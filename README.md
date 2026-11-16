@@ -2,6 +2,8 @@
 
 A project to build a custom [LineageOS](https://lineageos.org/) ROM for the **Motorola Moto g (2026)**.
 
+> **Working name: Chrysalis.** This is what we call the OS while it is being built. It is a working name, not a final one.
+
 This repo holds the notes, scripts, and configuration we use along the way. It is not a copy of the LineageOS source (that is hundreds of GB and is fetched with the `repo` tool, outside this repo).
 
 ## Goal
