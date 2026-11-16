@@ -1,0 +1,46 @@
+diff --git a/BoardConfig.mk b/BoardConfig.mk
+index efbea8c..a81e9d8 100644
+--- a/BoardConfig.mk
++++ b/BoardConfig.mk
+@@ -68,6 +68,9 @@ TARGET_RECOVERY_PIXEL_FORMAT := BGRA_8888
+ TARGET_USERIMAGES_USE_F2FS := true
+ 
+ # Kernel
++# Local change: let a device that layers on this tree (utah) point at its own
++# kernel directory. Defaults to the original location.
++KERNEL_PATH ?= $(DEVICE_PATH)-kernel
+ # Verified against stock: boot v4, vendor_boot v4, page size 4096,
+ # kernel 21.5 MB gzip, DT table with single mt6835-nevada DTB.
+ BOARD_KERNEL_BASE := 0x3fff8000
+@@ -87,15 +90,15 @@ BOARD_KERNEL_CMDLINE += androidboot.serialconsole=0
+ # BOARD_KERNEL_CMDLINE += androidboot.selinux=permissive
+ 
+ TARGET_FORCE_PREBUILT_KERNEL := true
+-BOARD_PREBUILT_DTBIMAGE_DIR := $(DEVICE_PATH)-kernel/dtb
++BOARD_PREBUILT_DTBIMAGE_DIR := $(KERNEL_PATH)/dtb
+ PRODUCT_COPY_FILES += \
+-	$(DEVICE_PATH)-kernel/Image.gz:kernel
++	$(KERNEL_PATH)/Image.gz:kernel
+ 
+-BOARD_VENDOR_KERNEL_MODULES := $(wildcard $(DEVICE_PATH)-kernel/vendor/*.ko)
+-BOARD_VENDOR_KERNEL_MODULES_LOAD := $(strip $(shell cat $(DEVICE_PATH)-kernel/modules.load.vendor))
+-BOARD_VENDOR_RAMDISK_KERNEL_MODULES := $(wildcard $(DEVICE_PATH)-kernel/vendor_ramdisk/*.ko)
+-BOARD_VENDOR_RAMDISK_KERNEL_MODULES_LOAD := $(strip $(shell cat $(DEVICE_PATH)-kernel/modules.load.vendor_ramdisk))
+-BOARD_VENDOR_RAMDISK_RECOVERY_KERNEL_MODULES_LOAD := $(strip $(shell cat $(DEVICE_PATH)-kernel/modules.load.recovery))
++BOARD_VENDOR_KERNEL_MODULES := $(wildcard $(KERNEL_PATH)/vendor/*.ko)
++BOARD_VENDOR_KERNEL_MODULES_LOAD := $(strip $(shell cat $(KERNEL_PATH)/modules.load.vendor))
++BOARD_VENDOR_RAMDISK_KERNEL_MODULES := $(wildcard $(KERNEL_PATH)/vendor_ramdisk/*.ko)
++BOARD_VENDOR_RAMDISK_KERNEL_MODULES_LOAD := $(strip $(shell cat $(KERNEL_PATH)/modules.load.vendor_ramdisk))
++BOARD_VENDOR_RAMDISK_RECOVERY_KERNEL_MODULES_LOAD := $(strip $(shell cat $(KERNEL_PATH)/modules.load.recovery))
+ BOOT_KERNEL_MODULES := $(BOARD_VENDOR_RAMDISK_RECOVERY_KERNEL_MODULES_LOAD) $(BOARD_VENDOR_RAMDISK_KERNEL_MODULES_LOAD)
+ 
+ BOARD_MKBOOTIMG_ARGS += \
+@@ -106,7 +109,7 @@ BOARD_MKBOOTIMG_ARGS += \
+     --tags_offset $(BOARD_TAGS_OFFSET)
+ 
+ TARGET_NO_KERNEL_OVERRIDE := true
+-TARGET_KERNEL_SOURCE := $(DEVICE_PATH)-kernel/headers/
++TARGET_KERNEL_SOURCE := $(KERNEL_PATH)/headers/
+ 
+ # Partitions
+ # RETUS PGPT (4K sectors): boot/vendor_boot 64 MiB each, super 8896 MiB.

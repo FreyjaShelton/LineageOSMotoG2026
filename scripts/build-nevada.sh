@@ -9,6 +9,8 @@
 # the build, not the terminal or the Claude app that started it.
 #   MEM_MAX=26G SWAP_MAX=40G   change the caps
 #   NO_SCOPE=1                 skip the scope (not recommended)
+#   DEVICE=utah                build the utah product instead of nevada (default nevada)
+#   JOBS=10                    limit parallel Ninja jobs (default: cores+2). Use ~10 while the Java r8 app steps run, or they fill the memory cap and swap
 set -o pipefail
 
 if [[ -z "$NO_SCOPE" && -z "$BUILD_NEVADA_IN_SCOPE" ]] && command -v systemd-run >/dev/null; then
@@ -20,6 +22,7 @@ if [[ -z "$NO_SCOPE" && -z "$BUILD_NEVADA_IN_SCOPE" ]] && command -v systemd-run
 fi
 
 SRC="${SRC:-$HOME/lineage/android}"
+DEVICE="${DEVICE:-nevada}"
 TARGET="${TARGET:-bacon}"
 LOG="${LOG:-$HOME/lineage/build.log}"
 
@@ -39,11 +42,11 @@ export LC_ALL=C
 
 # envsetup/lunch use unset variables, so no `set -u` here.
 source build/envsetup.sh || exit 1
-lunch lineage_nevada-bp2a-userdebug || exit 1
+lunch "lineage_${DEVICE}-bp2a-userdebug" || exit 1
 
 start=$(date +%s)
 echo "== build started $(date) target=$TARGET"
-mka "$TARGET" 2>&1 | tee "$LOG"
+mka ${JOBS:+-j$JOBS} "$TARGET" 2>&1 | tee "$LOG"
 rc=${PIPESTATUS[0]}
 echo "== build ended $(date), exit=$rc, $(( ($(date +%s) - start) / 60 )) min"
 exit "$rc"

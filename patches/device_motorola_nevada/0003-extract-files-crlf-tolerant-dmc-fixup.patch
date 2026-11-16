@@ -1,0 +1,19 @@
+diff --git a/extract-files.py b/extract-files.py
+index 8b6949d..8b1eab2 100755
+--- a/extract-files.py
++++ b/extract-files.py
+@@ -130,10 +130,10 @@ blob_fixups: blob_fixups_user_type = {
+     'vendor/etc/init/atcid.rc': blob_fixup()
+         .regex_replace('    interface vendor.mediatek.hardware.atci@1.0::IAtcid default\n', ''),
+     'vendor/etc/init/dmc_core.rc': blob_fixup()
+-        .regex_replace('    interface vendor.mediatek.hardware.dmc@1.0::IDmcService dmc_hidl_service\n', '')
+-        .regex_replace('    interface vendor.mediatek.hardware.dmc@1.1::IDmcService dmc_hidl_service\n', '')
+-        .regex_replace('    interface vendor.mediatek.hardware.dmc@1.2::IDmcService dmc_hidl_service\n', '')
+-        .regex_replace('    interface vendor.mediatek.hardware.apmonitor@2.0::IApmService apm_hidl_service\n', ''),
++        .regex_replace('    interface vendor.mediatek.hardware.dmc@1.0::IDmcService dmc_hidl_service\r?\n', '')
++        .regex_replace('    interface vendor.mediatek.hardware.dmc@1.1::IDmcService dmc_hidl_service\r?\n', '')
++        .regex_replace('    interface vendor.mediatek.hardware.dmc@1.2::IDmcService dmc_hidl_service\r?\n', '')
++        .regex_replace('    interface vendor.mediatek.hardware.apmonitor@2.0::IApmService apm_hidl_service\r?\n', ''),
+     # init.mmi.tcmd.rc's vendor.tcmd service declares no user (implicit root
+     # fails the verifier); stock runs it as root, system + its groups is the
+     # compliant equivalent.
