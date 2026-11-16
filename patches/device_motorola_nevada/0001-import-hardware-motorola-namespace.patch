@@ -1,0 +1,14 @@
+diff --git a/Android.bp b/Android.bp
+index fdb1ab2..a9ee8d9 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -7,7 +7,8 @@
+ soong_namespace {
+     imports: [
+         "hardware/google/interfaces",
+-        "hardware/google/pixel"
++        "hardware/google/pixel",
++        "hardware/motorola"
+     ],
+ }
+ 
