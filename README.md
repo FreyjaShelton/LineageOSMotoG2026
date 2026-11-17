@@ -10,6 +10,8 @@ This repo holds the notes, scripts, and configuration we use along the way. It i
 
 Produce a flashable LineageOS build that boots and works on a Moto g 2026, and keep the steps documented and repeatable so we can rebuild it later.
 
+> **Newer status (2026-11-17): the build, the unlock and the flashing all happened since this note was written. The current "where we left off" is at the top of [BUILD_PLAN.md](BUILD_PLAN.md). The section below is the 2026-11-15 handoff and is kept as history.**
+
 ## Where we left off (2026-11-15)
 
 **Handoff note for the next session** (we are moving the build work to a Linux laptop with about 900 GB free). Read [BUILD_PLAN.md](BUILD_PLAN.md) and [LESSONS.md](LESSONS.md) too.

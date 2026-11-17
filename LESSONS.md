@@ -8,7 +8,7 @@ When a new chat is told to "read the lessons file", read all of these before doi
 
 1. `LESSONS.md` (this file): working rules.
 2. `README.md`: device facts (Moto g 2026, `utah`, XT2613-1), the `nevada` community tree, firmware and recovery notes.
-3. `BUILD_PLAN.md`: where we build (the Linux laptop), the memory and crash rules, and each phase's status. The newest status is in the open Phase 2 items. This is where we left off.
+3. `BUILD_PLAN.md`: where we build (the Linux laptop), the memory and crash rules, and each phase's status. The newest status is the section "Where we left off" at the very top of the file (read it first); the phase sections below it are the history.
 4. `scripts/`: skim the header comment of each script (`build-nevada.sh` is the main entry point; `build-progress.sh` and `build-live.sh` are the watchers).
 
 Then look outside the repo for live state: `tail ~/lineage/build.log`, `systemctl --user list-units 'lineage-build-*'` (is a build running?), and `journalctl --list-boots` (did the laptop crash or reboot since the last notes?).
