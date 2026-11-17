@@ -7,6 +7,10 @@
 # log, then panic the kernel (SysRq c). The phone reboots by itself, the console log survives in
 # pstore, and our recovery can pull it: adb pull /sys/fs/pstore/console-ramoops-0
 # Needs SELinux permissive for the test boot (boot with androidboot.selinux=permissive).
+#
+# NOTE on syntax: init expands "$" in rc commands ("${prop}" or "$$" for a literal dollar), and a
+# bare "$(...)" is rejected as deprecated property syntax, which makes the whole command fail
+# before it runs (the first version of this file did exactly that and never fired). So: no "$".
 on early-init
     write /proc/sys/kernel/sysrq 1
-    exec_background - root root -- /system/bin/sh -c "sleep 150; [ x`getprop sys.boot_completed` = x1 ] || { echo ==== DEBUG-PANIC bootprof ==== > /dev/kmsg; cat /proc/bootprof > /dev/kmsg; echo ==== DEBUG-PANIC ps ==== > /dev/kmsg; ps -A -o PID,PPID,STAT,WCHAN,ARGS > /dev/kmsg; echo ==== DEBUG-PANIC crash ==== > /dev/kmsg; echo c > /proc/sysrq-trigger; }"
+    exec_background - root root -- /system/bin/sh -c "sleep 150; getprop sys.boot_completed | grep -q 1 || { echo ==== DEBUG-PANIC bootprof ==== > /dev/kmsg; cat /proc/bootprof > /dev/kmsg; echo ==== DEBUG-PANIC ps ==== > /dev/kmsg; ps -A -o PID,PPID,STAT,WCHAN,ARGS > /dev/kmsg; echo ==== DEBUG-PANIC crash ==== > /dev/kmsg; echo c > /proc/sysrq-trigger; }"
