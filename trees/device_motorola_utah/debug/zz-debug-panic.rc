@@ -1,0 +1,12 @@
+# DEBUG ONLY. Installed into /vendor/etc/init/ only when the build is run with
+# UTAH_DEBUG_PANIC=1 (see device.mk). Never ship this.
+#
+# Why: r3 and r4 hang with nothing on USB, a forced restart wipes the kernel console buffer, and
+# so there is no log. If boot has not completed 150 s after early-init, dump the vendor boot
+# milestones (/proc/bootprof) and the process list with kernel wait channels into the kernel
+# log, then panic the kernel (SysRq c). The phone reboots by itself, the console log survives in
+# pstore, and our recovery can pull it: adb pull /sys/fs/pstore/console-ramoops-0
+# Needs SELinux permissive for the test boot (boot with androidboot.selinux=permissive).
+on early-init
+    write /proc/sys/kernel/sysrq 1
+    exec_background - root root -- /system/bin/sh -c "sleep 150; [ x`getprop sys.boot_completed` = x1 ] || { echo ==== DEBUG-PANIC bootprof ==== > /dev/kmsg; cat /proc/bootprof > /dev/kmsg; echo ==== DEBUG-PANIC ps ==== > /dev/kmsg; ps -A -o PID,PPID,STAT,WCHAN,ARGS > /dev/kmsg; echo ==== DEBUG-PANIC crash ==== > /dev/kmsg; echo c > /proc/sysrq-trigger; }"

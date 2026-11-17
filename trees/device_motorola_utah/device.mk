@@ -15,3 +15,11 @@ $(call inherit-product, device/motorola/nevada/device.mk)
 PRODUCT_PACKAGES += \
     hwservicemanager \
     android.hidl.allocator@1.0-service
+
+# DEBUG ONLY: build with UTAH_DEBUG_PANIC=1 to add a vendor init rc that panics the kernel
+# 150 s after early-init if boot has not completed, so a hung boot leaves a log in pstore.
+# See trees/device_motorola_utah/debug/zz-debug-panic.rc and BUILD_PLAN.md.
+ifeq ($(UTAH_DEBUG_PANIC),1)
+PRODUCT_COPY_FILES += \
+    device/motorola/utah/debug/zz-debug-panic.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/zz-debug-panic.rc
+endif
