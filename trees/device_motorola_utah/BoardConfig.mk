@@ -44,6 +44,9 @@ endif
 # still be there beside it. Size is from the stock partition table (PGPT).
 BOARD_INIT_BOOT_IMAGE_PARTITION_SIZE := 8388608
 
+# init_boot header version must match boot/vendor_boot (v4, as stock).
+BOARD_MKBOOTIMG_INIT_ARGS += --header_version 4
+
 # Boot animation: the saved "trop-pink" vaporwave one (bootanimation/keep/ in the repo).
 # scripts/install-utah-tree.sh copies the zip here. LineageOS reads this variable
 # (vendor/lineage/config/BoardConfigSoong.mk) and installs it as the product
