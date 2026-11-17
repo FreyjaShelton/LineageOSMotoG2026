@@ -51,17 +51,20 @@ endif
 BOARD_USES_SYSTEM_DLKMIMAGE := true
 BOARD_SYSTEM_DLKMIMAGE_FILE_SYSTEM_TYPE := erofs
 TARGET_COPY_OUT_SYSTEM_DLKM := system_dlkm
-BOARD_MOTOROLA_DYNAMIC_PARTITIONS_PARTITION_LIST += system_dlkm
+BOARD_MOTOROLA_DYNAMIC_PARTITIONS_PARTITION_LIST := $(sort $(BOARD_MOTOROLA_DYNAMIC_PARTITIONS_PARTITION_LIST) system_dlkm)
 
 # init_boot (Phase 4, Step C2). Stock has a separate 8 MiB init_boot partition that
 # holds the generic ramdisk, and its boot.img has an EMPTY ramdisk. Without this,
 # our boot.img carried the ramdisk itself and the phone's stock init_boot would
 # still be there beside it. Size is from the stock partition table (PGPT).
 BOARD_INIT_BOOT_IMAGE_PARTITION_SIZE := 8388608
-# Header version of init_boot.img. Without this the build writes a legacy v0 header
-# (found 2026-11-17: ours was v0, stock's is v4, and boot.img/vendor_boot are v4).
-# A bootloader that reads init_boot as v4 gets garbage sizes from a v0 header.
-BOARD_INIT_BOOT_HEADER_VERSION := 4
+# init_boot.img header version. Without it the build writes a legacy v0 header (found
+# 2026-11-17: ours was v0; stock's init_boot, boot and vendor_boot are all v4, and a bootloader
+# that reads init_boot as v4 gets garbage sizes from a v0 header). Make's mkbootimg builds this
+# image, and BOARD_MKBOOTIMG_INIT_ARGS is what changes it. Do NOT use BOARD_INIT_BOOT_HEADER_VERSION:
+# nothing in this tree reads it (tested, the build did no work). scripts/rebuild-utah.sh checks for
+# the line below. Verify any build: init_boot.img must read header v4 (BUILD_PLAN.md, Step C3).
+BOARD_MKBOOTIMG_INIT_ARGS += --header_version 4
 
 # Boot animation: the saved "trop-pink" vaporwave one (bootanimation/keep/ in the repo).
 # scripts/install-utah-tree.sh copies the zip here. LineageOS reads this variable
