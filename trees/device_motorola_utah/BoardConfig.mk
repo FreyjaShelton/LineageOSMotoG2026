@@ -33,6 +33,19 @@ AB_OTA_PARTITIONS := \
     vendor \
     vendor_dlkm \
     vendor_boot \
+    init_boot \
     vbmeta \
     vbmeta_system
 endif
+
+# init_boot (Phase 4, Step C2). Stock has a separate 8 MiB init_boot partition that
+# holds the generic ramdisk, and its boot.img has an EMPTY ramdisk. Without this,
+# our boot.img carried the ramdisk itself and the phone's stock init_boot would
+# still be there beside it. Size is from the stock partition table (PGPT).
+BOARD_INIT_BOOT_IMAGE_PARTITION_SIZE := 8388608
+
+# Boot animation: the saved "trop-pink" vaporwave one (bootanimation/keep/ in the repo).
+# scripts/install-utah-tree.sh copies the zip here. LineageOS reads this variable
+# (vendor/lineage/config/BoardConfigSoong.mk) and installs it as the product
+# media/bootanimation.zip instead of generating its own.
+TARGET_BOOTANIMATION := device/motorola/utah/bootanimation/bootanimation.zip
