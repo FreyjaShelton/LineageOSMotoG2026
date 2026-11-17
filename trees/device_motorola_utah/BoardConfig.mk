@@ -32,19 +32,34 @@ AB_OTA_PARTITIONS := \
     product \
     vendor \
     vendor_dlkm \
+    system_dlkm \
     vendor_boot \
     init_boot \
     vbmeta \
     vbmeta_system
 endif
 
+# system_dlkm (found 2026-11-17 from the phone's boot log). Stock's super has a
+# system_dlkm logical partition and its first-stage fstab and vold REQUIRE it: without
+# it init died on "DM_DEV_STATUS failed for system_dlkm_a" and then vold aborted, so the
+# phone looped. Stock's copy is an empty placeholder (0.35 MB: only /etc/build.prop, a
+# notice file and two empty fs_config files, no kernel modules), so we build an empty
+# one. Needs the group list below (group name from our OTA payload: nevada's super group
+# is motorola_dynamic_partitions) and the OTA list above. See BUILD_PLAN.md, "Tracked
+# issue: partitions our build does not create". The old stopgap, deleting the lines from
+# the fstab, is scripts/drop-system-dlkm-from-fstab.sh (no longer needed with this).
+BOARD_USES_SYSTEM_DLKMIMAGE := true
+BOARD_SYSTEM_DLKMIMAGE_FILE_SYSTEM_TYPE := erofs
+TARGET_COPY_OUT_SYSTEM_DLKM := system_dlkm
+BOARD_MOTOROLA_DYNAMIC_PARTITIONS_PARTITION_LIST := $(sort $(BOARD_MOTOROLA_DYNAMIC_PARTITIONS_PARTITION_LIST) system_dlkm)
+
 # init_boot (Phase 4, Step C2). Stock has a separate 8 MiB init_boot partition that
 # holds the generic ramdisk, and its boot.img has an EMPTY ramdisk. Without this,
 # our boot.img carried the ramdisk itself and the phone's stock init_boot would
 # still be there beside it. Size is from the stock partition table (PGPT).
 BOARD_INIT_BOOT_IMAGE_PARTITION_SIZE := 8388608
-
-# init_boot header version must match boot/vendor_boot (v4, as stock).
+# init_boot header version must match boot/vendor_boot (v4, as stock). Make's mkbootimg
+# builds init_boot and defaults to v0; BOARD_INIT_BOOT_HEADER_VERSION is not read by this tree.
 BOARD_MKBOOTIMG_INIT_ARGS += --header_version 4
 
 # Boot animation: the saved "trop-pink" vaporwave one (bootanimation/keep/ in the repo).
