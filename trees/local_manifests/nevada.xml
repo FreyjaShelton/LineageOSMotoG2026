@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Local manifest for the utah build: install as
+     ~/lineage/android/.repo/local_manifests/nevada.xml
+     Recreated 2026-11-18 from BUILD_PLAN.md Phase 2 (the original lived only on the laptop).
+     Branches are NOT pinned, so a later sync may pull newer commits than the laptop had. -->
+<manifest>
+  <remote name="crabcakes" fetch="https://github.com/crabcakes97" revision="main" />
+  <remote name="xmd" fetch="https://github.com/xiaomi-mediatek-devs" />
+
+  <project path="device/motorola/nevada" name="android_device_motorola_nevada_lineage" remote="crabcakes" revision="main" />
+  <project path="vendor/motorola/nevada" name="android_vendor_motorola_nevada" remote="crabcakes" revision="main" clone-depth="1" />
+  <project path="device/motorola/nevada-kernel" name="android_device_motorola_nevada-kernel" remote="crabcakes" revision="main" />
+
+  <project path="hardware/mediatek" name="LineageOS/android_hardware_mediatek" remote="github" revision="lineage-23.0" />
+  <project path="device/mediatek/sepolicy_vndr" name="LineageOS/android_device_mediatek_sepolicy_vndr" remote="github" revision="lineage-23.0" />
+  <project path="hardware/motorola" name="LineageOS/android_hardware_motorola" remote="github" revision="lineage-23.0" />
+
+  <project path="vendor/mediatek/ims" name="android_vendor_mediatek_ims" remote="xmd" revision="android-16" />
+</manifest>

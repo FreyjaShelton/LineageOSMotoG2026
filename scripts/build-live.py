@@ -13,6 +13,15 @@ It follows ~/lineage/build.log by name, so it survives build restarts, and it
 waits between builds. Ctrl-C quits; the build keeps going. Not a terminal
 (piped)? It falls back to plain one-line-per-step output.
 
+Sync mode: the same display for a running `repo sync`, with two bars: projects landed (of the
+manifest total) and the size of the source tree on disk against EXPECT_GB (default 117, what a
+finished sync came to). The project bar reaches 100% while the last huge projects are still
+downloading, which is why the size bar is there too. One line appears per project as it lands,
+and the log (~/lineage/sync.log) supplies errors and the final `exit=N`. TOP=<source tree>.
+Chosen by `sync` or `--sync` on the command line (`wsl.exe` swallows `--sync`, so use
+`build-live.sh sync` from Windows), by SYNC=1, or automatically when a `repo sync` is running
+and no build is.
+
 Environment: LOG=path  FPS=12  NO_ANIM=1 (bar and text, no streaks)
 Self-test:   build-live.py --frames N --size WxH   (prints one frame, no screen takeover)
 """
@@ -24,9 +33,22 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 
-LOG = os.environ.get("LOG", os.path.expanduser("~/lineage/build.log"))
+def _auto_sync():
+    """No build unit running but a `repo sync` is: show the sync."""
+    try:
+        run = lambda *a: subprocess.run(a, capture_output=True, text=True, timeout=3).stdout.strip()
+        return not run("systemctl", "--user", "list-units", "lineage-build-*", "--no-legend", "--plain")             and bool(run("pgrep", "-f", "repo sync"))
+    except Exception:
+        return False
+
+
+SYNC = bool({"--sync", "sync"} & set(sys.argv[1:])) or bool(os.environ.get("SYNC")) or _auto_sync()
+TOP = os.environ.get("TOP", os.path.expanduser("~/lineage/android"))
+EXPECT_MB = float(os.environ.get("EXPECT_GB", "117")) * 1024
+LOG = os.environ.get("LOG", os.path.expanduser("~/lineage/sync.log" if SYNC else "~/lineage/build.log"))
 FPS = float(os.environ.get("FPS", "12"))
 ANIM = not os.environ.get("NO_ANIM")
 
@@ -34,6 +56,7 @@ PROGRESS = re.compile(r"^\[ *(\d+)% (\d+)/(\d+)\] (.*)$")
 PROBLEM = re.compile(
     r"^(FAILED:|ninja: |#### |== build )|[Ee]rror[: ]|fatal error|undefined (reference|symbol)"
 )
+EXIT = re.compile(r"^exit=(\d+)")
 UNIT_TIME = re.compile(r"lineage-build-(\d{8}-\d{6})")
 
 GREENS = [22, 28, 34, 40, 46, 82]  # dim -> bright
@@ -55,30 +78,43 @@ class State:
         self.pct = self.step = self.total = 0
         self.eta, self.task = "", ""
         self.t0 = self.s0 = None
+        self.exit = None  # sync mode: exit code from the log's last line
+        self.extra = ""  # sync mode: download figures for the header
+        self.bar = None  # sync mode: (MB now, MB expected, eta text) drives the bar
 
     def reset_average(self):
         self.t0 = self.s0 = None
+        self.exit = None
+
+    def progress(self, pct, step, total, task, now, quiet=False, use_eta=True):
+        """Record progress; add a summary line unless `quiet`."""
+        stamp = time.strftime("%H:%M:%S", time.localtime(now))
+        self.pct, self.step, self.total, self.task = pct, step, total, task
+        if self.t0 is None or self.step < self.s0:
+            self.t0, self.s0 = now, self.step
+        self.eta = ""
+        if use_eta and now - self.t0 >= 60 and self.step > self.s0:
+            left = (self.total - self.step) * (now - self.t0) / (self.step - self.s0)
+            self.eta = f"~{hm(left)} left"
+        if quiet:
+            return
+        self.lines.append([
+            (stamp + " ", DIM_TEXT),
+            (f"{self.pct:>4}% ", BOLD),
+            (f"{self.step:>7}/{self.total:<7} ", TEXT),
+            (f"{self.eta:<13}", YELLOW),
+            ("| ", DIM_TEXT),
+            (self.task, TEXT),
+        ])
 
     def feed(self, line, now):
-        stamp = time.strftime("%H:%M:%S", time.localtime(now))
         m = PROGRESS.match(line)
         if m:
-            self.pct, self.step, self.total = int(m[1]), int(m[2]), int(m[3])
-            self.task = re.sub(r"^//[^ ]*:", "", m[4])
-            if self.t0 is None or self.step < self.s0:
-                self.t0, self.s0 = now, self.step
-            self.eta = ""
-            if now - self.t0 >= 60 and self.step > self.s0:
-                left = (self.total - self.step) * (now - self.t0) / (self.step - self.s0)
-                self.eta = f"~{hm(left)} left"
-            self.lines.append([
-                (stamp + " ", DIM_TEXT),
-                (f"{self.pct:>4}% ", BOLD),
-                (f"{self.step:>7}/{self.total:<7} ", TEXT),
-                (f"{self.eta:<13}", YELLOW),
-                ("| ", DIM_TEXT),
-                (self.task, TEXT),
-            ])
+            self.progress(int(m[1]), int(m[2]), int(m[3]), re.sub(r"^//[^ ]*:", "", m[4]), now)
+            return
+        m = EXIT.match(line)
+        if m:
+            self.exit = int(m[1])
         elif PROBLEM.search(line):
             self.lines.append([(f">>> {line[:300]}", RED)])
 
@@ -114,6 +150,88 @@ class Follower:
         if skip_first and parts:
             parts.pop(0)
         return [p for p in parts if p], truncated
+
+
+class SyncWatcher:
+    """Sync mode: count the projects that have landed in the work tree (they get a
+    .git entry once checked out) and measure the size of .repo in a helper thread."""
+
+    def __init__(self):
+        self.paths, self.seen, self.first = [], set(), True
+        self.last_load = self.last_poll = 0.0
+        self.mb, self.rate, self._samples, self.start = 0, 0.0, [], None
+        threading.Thread(target=self._du_loop, daemon=True).start()
+
+    def _du_loop(self):
+        while True:
+            try:
+                out = subprocess.run(["nice", "-n", "19", "ionice", "-c3", "du", "-sm", TOP], capture_output=True, text=True,
+                                     timeout=120).stdout.split()
+                now = time.time()
+                self.mb = int(out[0])
+                if self.start is None:
+                    self.start = (now, self.mb)
+                self._samples = [x for x in self._samples if now - x[0] < 120] + [(now, self.mb)]
+                (t0, m0), (t1, m1) = self._samples[0], self._samples[-1]
+                self.rate = (m1 - m0) * 60 / (t1 - t0) if t1 - t0 >= 5 else self.rate
+            except Exception:
+                pass
+            time.sleep(20)  # du of a 100 GB tree costs a core for seconds: keep it rare
+
+    def load(self, now):
+        if self.paths or now - self.last_load < 10:
+            return
+        self.last_load = now
+        try:
+            out = subprocess.run(["repo", "list", "-p"], cwd=TOP, capture_output=True,
+                                 text=True, timeout=60).stdout.split()
+            self.paths = sorted(out)
+        except Exception:
+            pass
+
+    def poll(self, state, now):
+        if now - self.last_poll < 2 and not self.first:  # about 1,100 stat calls: not every frame
+            return
+        self.last_poll = now
+        self.load(now)
+        if not self.paths:
+            return
+        new = [p for p in self.paths if p not in self.seen
+               and os.path.exists(os.path.join(TOP, p, ".git"))]
+        total = len(self.paths)
+        if self.first:  # whatever is already there: no lines, just the starting point
+            self.seen.update(new)
+            state.progress(len(self.seen) * 100 // total, len(self.seen), total, "", now,
+                           quiet=True, use_eta=False)
+            self.first = False
+        for p in new:
+            if p in self.seen:
+                continue
+            self.seen.add(p)
+            n = len(self.seen)
+            state.progress(n * 100 // total, n, total, p, now, use_eta=False)
+        if self.mb:
+            eta = ""
+            if self.start and now - self.start[0] >= 60 and self.mb > self.start[1]:
+                avg = (self.mb - self.start[1]) / (now - self.start[0])  # MB/s since we started
+                left = max(0.0, EXPECT_MB - self.mb) / avg
+                eta = f"~{hm(left)} left"
+            state.bar = (self.mb, EXPECT_MB, eta)
+            state.extra = f"   {self.rate:.0f} MB/min"
+
+
+def sync_proc():
+    """(pid, start epoch) of the running `repo sync`, or (None, None)."""
+    try:
+        pid = subprocess.run(["pgrep", "-of", "repo sync"], capture_output=True, text=True,
+                             timeout=3).stdout.split()
+        if not pid:
+            return None, None
+        age = subprocess.run(["ps", "-o", "etimes=", "-p", pid[0]], capture_output=True,
+                             text=True, timeout=3).stdout.strip()
+        return pid[0], time.time() - int(age)
+    except Exception:
+        return None, None
 
 
 def build_unit():
@@ -210,39 +328,60 @@ def render_row(cells):
     return "".join(out)
 
 
+def bars_of(state):
+    """The progress bars to draw, as (fraction, text after the bar)."""
+    bars = []
+    if SYNC:
+        frac = state.step / state.total if state.total else 0.0
+        bars.append((frac, f" {frac * 100:5.1f}%  {state.step}/{state.total} projects"))
+        cur, tot, eta = state.bar or (0, EXPECT_MB, "")
+        frac = min(cur / tot, 0.995)  # the expected size is an estimate: never show 100% early
+        bars.append((frac, f" {frac * 100:5.1f}%  {cur / 1024:.0f}/{tot / 1024:.0f} GB  {eta}"))
+    else:
+        frac = state.step / state.total if state.total else 0.0
+        bars.append((frac, f" {frac * 100:5.1f}%  {state.step}/{state.total}  {state.eta}"))
+    return bars
+
+
+def chrome_rows():
+    """Rows that are not the scrolling body: header, the bars, footer."""
+    return 2 + (2 if SYNC else 1)
+
+
 def frame(state, streaks, cols, rows, status, elapsed):
     blank = lambda: [(" ", "")] * cols
     lines = []
 
     # Header
     row = blank()
-    put(row, 0, [(" LineageOS nevada build   ", BOLD), (status[0], status[1]),
-                 (f"   elapsed {hm(elapsed)}" if elapsed is not None else "", DIM_TEXT)], cols)
+    put(row, 0, [(" LineageOS sync   " if SYNC else " LineageOS nevada build   ", BOLD),
+                 (status[0], status[1]),
+                 (f"   elapsed {hm(elapsed)}" if elapsed is not None else "", DIM_TEXT),
+                 (state.extra, DIM_TEXT)], cols)
     lines.append(row)
 
-    # Progress bar
-    frac = state.step / state.total if state.total else 0.0
-    suffix = f" {frac * 100:5.1f}%  {state.step}/{state.total}  {state.eta}"
-    width = max(10, cols - len(suffix) - 3)
-    filled = frac * width
-    full = int(filled)
-    row = blank()
-    segs = [(" [", DIM_TEXT), ("█" * full, BAR_FILL)]
-    if full < width:
-        eighths = int((filled - full) * 8)  # a partial block for the fraction
-        segs.append((PARTIAL[eighths], BAR_FILL) if eighths else ("░", BAR_EMPTY))
-        segs.append(("░" * (width - full - 1), BAR_EMPTY))
-    segs += [("]", DIM_TEXT), (suffix, BOLD)]
-    col = 0
-    for text, style in segs:  # the bar row is solid: spaces are written too
-        for ch in text:
-            if col < cols:
-                row[col] = (ch, style)
-            col += 1
-    lines.append(row)
+    # Progress bars: one per kind of progress (a build has one, a sync has two)
+    for frac, suffix in bars_of(state):
+        width = max(10, cols - len(suffix) - 3)
+        filled = frac * width
+        full = int(filled)
+        row = blank()
+        segs = [(" [", DIM_TEXT), ("█" * full, BAR_FILL)]
+        if full < width:
+            eighths = int((filled - full) * 8)  # a partial block for the fraction
+            segs.append((PARTIAL[eighths], BAR_FILL) if eighths else ("░", BAR_EMPTY))
+            segs.append(("░" * (width - full - 1), BAR_EMPTY))
+        segs += [("]", DIM_TEXT), (suffix, BOLD)]
+        col = 0
+        for text, style in segs:  # the bar row is solid: spaces are written too
+            for ch in text:
+                if col < cols:
+                    row[col] = (ch, style)
+                col += 1
+        lines.append(row)
 
     # Body: animation underneath, log lines on top, bottom-aligned
-    body = rows - 3
+    body = rows - chrome_rows()
     grid = streaks.cells() if (streaks and ANIM) else {}
     shown = list(state.lines)[-body:] if body > 0 else []
     for r in range(body):
@@ -261,7 +400,7 @@ def frame(state, streaks, cols, rows, status, elapsed):
 
     # Footer
     row = blank()
-    hint = "Ctrl-C quits (build keeps going) "
+    hint = f"Ctrl-C quits ({'sync' if SYNC else 'build'} keeps going) "
     room = max(0, cols - len(hint) - len(" now: ") - 2)
     put(row, 0, [(" now: ", DIM_TEXT), (state.task[:room], TEXT)], cols)
     if cols > len(hint) + 20:
@@ -280,8 +419,11 @@ def main():
         test_size = (int(w), int(h))
 
     follower, state = Follower(LOG), State()
+    watcher = SyncWatcher() if SYNC else None
 
     def pump():
+        if watcher:
+            watcher.poll(state, time.time())
         new, truncated = follower.read()
         if truncated:
             state.reset_average()
@@ -294,6 +436,8 @@ def main():
             new, truncated = follower.read()
             if truncated:
                 state.reset_average()
+            if watcher:
+                watcher.poll(state, time.time())
             for line in new:
                 before = len(state.lines)
                 state.feed(line, time.time())
@@ -319,16 +463,21 @@ def main():
             t = time.time()
             pump()
             if t - last_check > 2:
-                unit, start = build_unit()
+                unit, start = sync_proc() if SYNC else build_unit()
                 last_check = t
             cols, rows = size_now()
             if (cols, rows) != size:
-                size, streaks = (cols, rows), Streaks(cols, rows - 3)
+                size, streaks = (cols, rows), Streaks(cols, rows - chrome_rows())
             streaks.step()
             if unit:
                 status, elapsed = ("● running", GREEN), (t - start if start else None)
+            elif SYNC and state.exit is not None:
+                ok = state.exit == 0
+                status, elapsed = ((f"✓ sync finished" if ok else f"✗ sync failed (exit {state.exit})"),
+                                   GREEN if ok else RED), None
             else:
-                status, elapsed = ("○ no build running, waiting for the next one", YELLOW), None
+                what = "no sync running" if SYNC else "no build running, waiting for the next one"
+                status, elapsed = (f"○ {what}", YELLOW), None
             rows_out = frame(state, streaks, cols, rows, status, elapsed)
             text = "\x1b[H" + "\r\n".join(render_row(r) for r in rows_out)
             n += 1
