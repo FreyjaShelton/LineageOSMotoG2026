@@ -27,6 +27,11 @@ Soong analysis (the first minutes of a build, before Ninja counts steps): while 
 running the bar shows elapsed time against a typical SOONG_EST seconds (default 360, an estimate,
 capped at 99%) plus soong_build's RAM and CPU time. There is no real step count to show.
 
+Remote mode (`build-live.py remote`, run natively on the Windows PC): show a build that is running
+on another machine, over ssh. It copies scripts/build-live-feed.sh to the host (REMOTE_HOST, default
+`laptop`, an ssh shortcut), runs it there, and draws the log lines and status it prints (build running
+or not, elapsed time, soong_build figures). It reconnects by itself if the connection drops.
+
 Environment: LOG=path  FPS=12  NO_ANIM=1 (bar and text, no streaks)
 Self-test:   build-live.py --frames N --size WxH   (prints one frame, no screen takeover)
 """
@@ -52,6 +57,8 @@ def _auto_sync():
 
 SYNC = bool({"--sync", "sync"} & set(sys.argv[1:])) or bool(os.environ.get("SYNC")) or _auto_sync()
 TOP = os.environ.get("TOP", os.path.expanduser("~/lineage/android"))
+REMOTE = "remote" in sys.argv[1:] or bool(os.environ.get("REMOTE"))
+REMOTE_HOST = os.environ.get("REMOTE_HOST", "laptop")
 SOONG_EST = int(os.environ.get("SOONG_EST", "360"))
 EXPECT_MB = float(os.environ.get("EXPECT_GB", "117")) * 1024
 LOG = os.environ.get("LOG", os.path.expanduser("~/lineage/sync.log" if SYNC else "~/lineage/build.log"))
@@ -158,6 +165,45 @@ class Follower:
         if skip_first and parts:
             parts.pop(0)
         return [p for p in parts if p], truncated
+
+
+class RemoteFeed:
+    """Remote mode: run build-live-feed.sh on REMOTE_HOST over ssh and collect what it prints."""
+
+    def __init__(self):
+        self.lines = collections.deque()  # log lines waiting to be fed to State
+        self.status = None  # (unit, start epoch, now epoch, soong RAM MB, soong secs, soong CPU secs)
+        self.connected, self.error = False, ""
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        feed = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build-live-feed.sh")
+        opts = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=10"]
+        while True:
+            try:
+                subprocess.run(["scp", "-q", *opts, feed, f"{REMOTE_HOST}:/tmp/build-live-feed.sh"],
+                               check=True, capture_output=True, timeout=30)
+                p = subprocess.Popen(["ssh", *opts, REMOTE_HOST, "bash /tmp/build-live-feed.sh"],
+                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                self.connected, self.error, buf = True, "", b""
+                while True:
+                    chunk = p.stdout.read1(65536)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    parts = re.split(rb"[\r\n]", buf)
+                    buf = parts.pop()
+                    for raw in parts:
+                        line = raw.decode("utf-8", "replace")
+                        if line.startswith("@@STATUS "):
+                            f = line.split()[1:]
+                            self.status = (f[0], int(f[1]), int(f[2]), int(f[3]), int(f[4]), int(f[5]))
+                        elif line:
+                            self.lines.append(line)
+            except Exception as e:  # ssh or scp failed: say so, then try again
+                self.error = str(e)[:80]
+            self.connected, self.status = False, None
+            time.sleep(3)
 
 
 class SyncWatcher:
@@ -383,7 +429,8 @@ def frame(state, streaks, cols, rows, status, elapsed):
 
     # Header
     row = blank()
-    put(row, 0, [(" LineageOS sync   " if SYNC else " LineageOS nevada build   ", BOLD),
+    put(row, 0, [(" LineageOS sync   " if SYNC else
+                  f" LineageOS nevada build on {REMOTE_HOST}   " if REMOTE else " LineageOS nevada build   ", BOLD),
                  (status[0], status[1]),
                  (f"   elapsed {hm(elapsed)}" if elapsed is not None else "", DIM_TEXT),
                  (state.extra, DIM_TEXT)], cols)
@@ -452,10 +499,19 @@ def main():
 
     follower, state = Follower(LOG), State()
     watcher = SyncWatcher() if SYNC else None
+    remote = RemoteFeed() if REMOTE else None
+    if os.name == "nt":  # Windows console: UTF-8 output and ANSI escapes
+        os.system("")
+        sys.stdout.reconfigure(encoding="utf-8")
 
     def pump():
         if watcher:
             watcher.poll(state, time.time())
+        if remote:
+            now = time.time()
+            while remote.lines:
+                state.feed(remote.lines.popleft(), now)
+            return
         new, truncated = follower.read()
         if truncated:
             state.reset_average()
@@ -495,9 +551,19 @@ def main():
             t = time.time()
             pump()
             if t - last_check > 2:
-                unit, start = sync_proc() if SYNC else build_unit()
-                if not SYNC:
+                if remote:
+                    st = remote.status
+                    unit = st[0] if st and st[0] != "-" else None
+                    start = t - (st[2] - st[1]) if unit and st[1] else None  # the host's elapsed time
+                elif SYNC:
+                    unit, start = sync_proc()
+                else:
+                    unit, start = build_unit()
+                if remote:
+                    state.soong = (remote.status[3], remote.status[4], remote.status[5])                         if remote.status and remote.status[4] else None
+                if not SYNC and not remote:
                     state.soong = soong_info()
+                if not SYNC:
                     if state.soong:
                         state.soong_hist = [x for x in state.soong_hist if t - x[0] < 12] + [(t, state.soong[2])]
                     else:
