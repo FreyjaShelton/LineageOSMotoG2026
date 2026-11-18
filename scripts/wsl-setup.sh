@@ -11,7 +11,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
   bc bison build-essential ccache curl flex g++-multilib gcc-multilib git git-lfs \
   gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev lz4 libssl-dev \
   libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip unzip \
-  zlib1g-dev lib32ncurses-dev libncurses-dev python-is-python3 python3 repo \
+  zlib1g-dev lib32ncurses-dev libncurses-dev python-is-python3 python3 repo cpio \
   erofs-utils android-sdk-libsparse-utils
 
 git lfs install

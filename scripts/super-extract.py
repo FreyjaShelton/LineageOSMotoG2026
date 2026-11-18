@@ -1,6 +1,9 @@
 import struct, glob, os, sys
 
-FW = r"D:\LineageOS\firmware\NEVADA_G_SYS_W1WNS36.18_114_3_2_1_1_1_subsidy_DEFAULT_regulatory_DEFAULT_cid50_CFC.xml"
+# Usage: super-extract.py [partition|all]   (default system_dlkm_a)
+# Env: FW=<firmware folder with super.img_sparsechunk.*>  OUT=<output folder>
+# (defaults are the Windows paths; in WSL: FW=~/lineage/firmware/NEVADA*/ OUT=~/lineage/work/parts)
+FW = os.environ.get("FW", r"D:\LineageOS\firmware\NEVADA_G_SYS_W1WNS36.18_114_3_2_1_1_1_subsidy_DEFAULT_regulatory_DEFAULT_cid50_CFC.xml")
 files = sorted(glob.glob(os.path.join(FW, "super.img_sparsechunk.*")), key=lambda p: int(p.rsplit(".", 1)[1]))
 
 # --- map the sparse chunks: list of (raw_start, length, kind, file, file_offset, fill) ---
@@ -79,10 +82,13 @@ for name, gi, size, exts in parts:
     print(f"  {name:20s} group={groups[gi][0]:24s} {size/1e6:9.2f} MB  extents={len(exts)}")
 
 want = sys.argv[1] if len(sys.argv) > 1 else "system_dlkm_a"
-os.makedirs(r"D:\LineageOS\work", exist_ok=True)
+OUT = os.environ.get("OUT", r"D:\LineageOS\work")
+os.makedirs(OUT, exist_ok=True)
 for name, gi, size, exts in parts:
-    if name == want:
-        out = os.path.join(r"D:\LineageOS\work", name + ".img")
+    if want == "all" and size == 0:
+        continue
+    if name == want or want == "all":
+        out = os.path.join(OUT, name + ".img")
         with open(out, "wb") as o:
             for ns, td in exts:
                 o.write(read(td * 512, ns * 512))

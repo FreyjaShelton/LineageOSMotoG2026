@@ -3,7 +3,8 @@
 green streaks falling through the text.
 
     LineageOS nevada build   * running   elapsed 0h35m
-    [███████████░░░░░░░░░░░░░░░░░░░]  31.5%  62501/197761  ~1h50m left
+    [███████████░░░░░░░░░░░░░░░░░░░]
+     31.5%  62501/197761  ~1h50m left            (each bar's text sits under it)
      │ 4 ┃ │ ; ┃                    (green streaks fall through the lines)
      21:17:56   31%   62501/197761  ~1h50m left | libcodec2_soft_flacenc ...
      >>> FAILED: ...            (failures and errors, in red)
@@ -21,6 +22,10 @@ and the log (~/lineage/sync.log) supplies errors and the final `exit=N`. TOP=<so
 Chosen by `sync` or `--sync` on the command line (`wsl.exe` swallows `--sync`, so use
 `build-live.sh sync` from Windows), by SYNC=1, or automatically when a `repo sync` is running
 and no build is.
+
+Soong analysis (the first minutes of a build, before Ninja counts steps): while `soong_build` is
+running the bar shows elapsed time against a typical SOONG_EST seconds (default 360, an estimate,
+capped at 99%) plus soong_build's RAM and CPU time. There is no real step count to show.
 
 Environment: LOG=path  FPS=12  NO_ANIM=1 (bar and text, no streaks)
 Self-test:   build-live.py --frames N --size WxH   (prints one frame, no screen takeover)
@@ -47,6 +52,7 @@ def _auto_sync():
 
 SYNC = bool({"--sync", "sync"} & set(sys.argv[1:])) or bool(os.environ.get("SYNC")) or _auto_sync()
 TOP = os.environ.get("TOP", os.path.expanduser("~/lineage/android"))
+SOONG_EST = int(os.environ.get("SOONG_EST", "360"))
 EXPECT_MB = float(os.environ.get("EXPECT_GB", "117")) * 1024
 LOG = os.environ.get("LOG", os.path.expanduser("~/lineage/sync.log" if SYNC else "~/lineage/build.log"))
 FPS = float(os.environ.get("FPS", "12"))
@@ -80,6 +86,8 @@ class State:
         self.t0 = self.s0 = None
         self.exit = None  # sync mode: exit code from the log's last line
         self.extra = ""  # sync mode: download figures for the header
+        self.soong_hist = []  # build mode: (time, soong_build CPU seconds) samples
+        self.soong = None  # build mode: (RAM MB, seconds running, CPU seconds) of soong_build
         self.bar = None  # sync mode: (MB now, MB expected, eta text) drives the bar
 
     def reset_average(self):
@@ -328,15 +336,36 @@ def render_row(cells):
     return "".join(out)
 
 
+def soong_info():
+    """(RAM MB, seconds running, CPU seconds) of a running soong_build, else None."""
+    try:
+        out = subprocess.run(["ps", "-C", "soong_build", "-o", "rss=,etimes=,cputimes="],
+                             capture_output=True, text=True, timeout=3).stdout.split()
+        return (int(out[0]) // 1024, int(out[1]), int(out[2])) if len(out) >= 3 else None
+    except Exception:
+        return None
+
+
 def bars_of(state):
     """The progress bars to draw, as (fraction, text after the bar)."""
     bars = []
+    if state.soong and not SYNC:
+        ram, el, cpu = state.soong
+        frac = min(el / SOONG_EST, 0.99)
+        h = state.soong_hist
+        cores = (h[-1][1] - h[0][1]) / (h[-1][0] - h[0][0]) if len(h) > 1 and h[-1][0] > h[0][0] else 0.0
+        # Soong prints nothing; busy cores is the only live signal. Many cores = parsing and
+        # generating build actions; about one core = the serial finish (writing the ninja file).
+        phase = "parallel part" if cores >= 1.5 else "serial part, about 1 core" if cores >= 0.15 else "waiting / disk"
+        return [(frac, f" Soong analysis  {el // 60}m{el % 60:02d}s   {phase} ({cores:.1f} cores busy)   "
+                       f"soong_build {ram / 1024:.1f} GB RAM   (no step count: bar = time vs a typical "
+                       f"{SOONG_EST // 60} min, an estimate)")]
     if SYNC:
         frac = state.step / state.total if state.total else 0.0
-        bars.append((frac, f" {frac * 100:5.1f}%  {state.step}/{state.total} projects"))
+        bars.append((frac, f" Projects  {frac * 100:5.1f}%  {state.step}/{state.total}"))
         cur, tot, eta = state.bar or (0, EXPECT_MB, "")
         frac = min(cur / tot, 0.995)  # the expected size is an estimate: never show 100% early
-        bars.append((frac, f" {frac * 100:5.1f}%  {cur / 1024:.0f}/{tot / 1024:.0f} GB  {eta}"))
+        bars.append((frac, f" Size on disk  {frac * 100:5.1f}%  {cur / 1024:.0f}/{tot / 1024:.0f} GB  {eta}"))
     else:
         frac = state.step / state.total if state.total else 0.0
         bars.append((frac, f" {frac * 100:5.1f}%  {state.step}/{state.total}  {state.eta}"))
@@ -344,8 +373,8 @@ def bars_of(state):
 
 
 def chrome_rows():
-    """Rows that are not the scrolling body: header, the bars, footer."""
-    return 2 + (2 if SYNC else 1)
+    """Rows that are not the scrolling body: header, the bars (two rows each), footer."""
+    return 2 + 2 * (2 if SYNC else 1)
 
 
 def frame(state, streaks, cols, rows, status, elapsed):
@@ -361,8 +390,8 @@ def frame(state, streaks, cols, rows, status, elapsed):
     lines.append(row)
 
     # Progress bars: one per kind of progress (a build has one, a sync has two)
-    for frac, suffix in bars_of(state):
-        width = max(10, cols - len(suffix) - 3)
+    for frac, suffix in bars_of(state):  # every bar is full width, its text on the row below
+        width = max(10, cols - 3)
         filled = frac * width
         full = int(filled)
         row = blank()
@@ -371,13 +400,16 @@ def frame(state, streaks, cols, rows, status, elapsed):
             eighths = int((filled - full) * 8)  # a partial block for the fraction
             segs.append((PARTIAL[eighths], BAR_FILL) if eighths else ("░", BAR_EMPTY))
             segs.append(("░" * (width - full - 1), BAR_EMPTY))
-        segs += [("]", DIM_TEXT), (suffix, BOLD)]
+        segs += [("]", DIM_TEXT)]
         col = 0
         for text, style in segs:  # the bar row is solid: spaces are written too
             for ch in text:
                 if col < cols:
                     row[col] = (ch, style)
                 col += 1
+        lines.append(row)
+        row = blank()
+        put(row, 0, [(suffix, BOLD)], cols)
         lines.append(row)
 
     # Body: animation underneath, log lines on top, bottom-aligned
@@ -464,6 +496,12 @@ def main():
             pump()
             if t - last_check > 2:
                 unit, start = sync_proc() if SYNC else build_unit()
+                if not SYNC:
+                    state.soong = soong_info()
+                    if state.soong:
+                        state.soong_hist = [x for x in state.soong_hist if t - x[0] < 12] + [(t, state.soong[2])]
+                    else:
+                        state.soong_hist = []
                 last_check = t
             cols, rows = size_now()
             if (cols, rows) != size:

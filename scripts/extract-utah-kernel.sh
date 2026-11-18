@@ -4,17 +4,21 @@
 # blobs (W1WNS36.18-114-3-2-1-1-1; kernel 5.15.189). Same layout as
 # device/motorola/nevada-kernel. Safe to re-run (replaces the directory).
 # Needs: firmware in ~/lineage/firmware, the super partitions split into
-# ~/lineage/work/parts (vendor_dlkm_a.img), and a built host tree (unpack_bootimg, fsck.erofs).
+# ~/lineage/work/parts (vendor_dlkm_a.img; scripts/unpack-firmware.sh makes it), and
+# unpack_bootimg + fsck.erofs: from a built host tree if there is one, otherwise the
+# source tree's python unpack_bootimg and the system's fsck.erofs (apt: erofs-utils).
 set -euo pipefail
 SRC="${SRC:-$HOME/lineage/android}"; WORK="${WORK:-$HOME/lineage/work}"
 FW=$(echo "$HOME"/lineage/firmware/NEVADA*/); HB="$SRC/out/host/linux-x86/bin"
+if [ -x "$HB/unpack_bootimg" ]; then UNPACK="$HB/unpack_bootimg"; else UNPACK="python3 $SRC/system/tools/mkbootimg/unpack_bootimg.py"; fi
+if [ -x "$HB/fsck.erofs" ]; then FSCK="$HB/fsck.erofs"; else FSCK=fsck.erofs; fi
 OUT="$SRC/device/motorola/utah-kernel"; T=$(mktemp -d "$WORK/utah-kernel.XXXX"); trap 'rm -rf "$T"' EXIT
 
 mkdir -p "$T/boot" "$T/vboot" "$T/ramdisk" "$T/dlkm"
-"$HB/unpack_bootimg" --boot_img "$FW/boot.img" --out "$T/boot" >/dev/null
-"$HB/unpack_bootimg" --boot_img "$FW/vendor_boot.img" --out "$T/vboot" >/dev/null
+$UNPACK --boot_img "$FW/boot.img" --out "$T/boot" >/dev/null
+$UNPACK --boot_img "$FW/vendor_boot.img" --out "$T/vboot" >/dev/null
 ( cd "$T/ramdisk" && lz4 -dc "$T/vboot/vendor_ramdisk00" | cpio -idm --no-absolute-filenames 2>/dev/null )
-"$HB/fsck.erofs" --extract="$T/dlkm" --no-preserve "$WORK/parts/vendor_dlkm_a.img" >/dev/null
+"$FSCK" --extract="$T/dlkm" --no-preserve "$WORK/parts/vendor_dlkm_a.img" >/dev/null
 
 rm -rf "$OUT"; mkdir -p "$OUT/dtb" "$OUT/vendor" "$OUT/vendor_ramdisk"
 cp "$T/boot/kernel" "$OUT/Image.gz"                          # gzip Image from boot.img
