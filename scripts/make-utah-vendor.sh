@@ -20,3 +20,22 @@ rm -rf "$OUT"; mkdir -p "$OUT/radio"
   printf '\nendif\n'
 } > "$OUT/Android.mk"
 echo "vendor/motorola/utah: $(ls "$OUT/radio" | wc -l) firmware images"
+
+# STOCK VENDOR IMAGE (2026-11-18). The vendor partition is NOT built any more: stock's own vendor.img
+# (erofs, already carrying its AVB hashtree footer) is dropped in as BOARD_PREBUILT_VENDORIMAGE (see
+# trees/device_motorola_utah/BoardConfig.mk). Reason: the nevada tree rebuilt the vendor from a blob list
+# plus services compiled from source, and seven builds in, every layer (composer, thermal, audio, its
+# libraries, its effects) turned out to be an Android 13 stock blob running against Android 16 vendor-variant
+# libraries of the same name (BUILD_PLAN.md, "A bigger option" and "Flash day"). The image comes from our own
+# unpacked firmware (~/lineage/work/parts, made by scripts/unpack-firmware.sh) and is NOT stored in git.
+PARTS="${PARTS:-$HOME/lineage/work/parts}"
+if [ -f "$PARTS/vendor_a.img" ]; then
+  mkdir -p "$OUT/prebuilt"
+  rm -f "$OUT/prebuilt/vendor.img"
+  cp -p "$PARTS/vendor_a.img" "$OUT/prebuilt/vendor.img"
+  echo "vendor/motorola/utah: stock vendor.img ($(stat -c %s "$OUT/prebuilt/vendor.img") bytes) staged as the prebuilt vendor image"
+else
+  echo "ERROR: $PARTS/vendor_a.img not found: run scripts/unpack-firmware.sh first" >&2
+  exit 1
+fi
+rm -rf "$OUT/stock" "$OUT/hal" "$OUT/Android.bp" "$OUT/utah-vendor.mk"   # leftovers of the HAL-by-HAL approach

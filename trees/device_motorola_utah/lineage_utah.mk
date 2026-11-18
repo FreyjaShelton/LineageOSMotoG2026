@@ -10,6 +10,11 @@
 #
 
 # Inherit from those products. Most specific first.
+# Stock's vendor sets ro.zygote=zygote64 (no 32-bit zygote) and ships no 32-bit GPU libraries. The default
+# here is zygote64_32, whose 32-bit zygote aborts ("couldn't find an OpenGL ES implementation"); its
+# "onrestart restart zygote" then killed the main zygote and system_server every 5 s, so boot never
+# completed (found 2026-11-18 in /metadata/dbg). ZYGOTE_FORCE_64 must be set BEFORE core_64_bit.mk is parsed.
+ZYGOTE_FORCE_64 := true
 $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
 

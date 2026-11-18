@@ -1,0 +1,9 @@
+# DEBUG ONLY. Installed into /system/etc/init/ (the vendor image is prebuilt) only when the build is
+# run with UTAH_DEBUG_PANIC=1 (see device.mk). Never ship this.
+#
+# Why: r3 to r5 never complete boot and give no log. A panic timer (zz-debug-panic.rc) needed
+# exact key timing and cost hours. This one starts /system/bin/zz-debug-log.sh, which writes
+# dmesg, logcat, ps and getprop into /metadata/dbg every 20 s; /metadata survives any restart
+# and our recovery can read it (see the header of the script).
+on early-init
+    exec_background - root root -- /system/bin/sh /system/bin/zz-debug-log.sh

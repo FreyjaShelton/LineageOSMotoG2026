@@ -32,7 +32,13 @@ on another machine, over ssh. It copies scripts/build-live-feed.sh to the host (
 `laptop`, an ssh shortcut), runs it there, and draws the log lines and status it prints (build running
 or not, elapsed time, soong_build figures). It reconnects by itself if the connection drops.
 
-Environment: LOG=path  FPS=12  NO_ANIM=1 (bar and text, no streaks)
+Ending: when a build stops, the header says how (finished, failed, KILLED FOR MEMORY by systemd-oomd or the
+kernel, the machine restarted, or stopped without a result) and a red or green box says it in words;
+a terminal bell rings for anything but a clean finish. In remote mode, losing the ssh connection shows
+"no contact with <host>" instead of pretending nothing is running. The wording comes from
+build-live-feed.sh (`build-live-feed.sh outcome <unit|latest>`).
+
+Environment: LOG=path  FPS=12  NO_ANIM=1 (bar and text, no streaks)  DEMO_END=OOM|OK|FAILED|REBOOT|STOPPED (self-test)
 Self-test:   build-live.py --frames N --size WxH   (prints one frame, no screen takeover)
 """
 import collections
@@ -50,7 +56,7 @@ def _auto_sync():
     """No build unit running but a `repo sync` is: show the sync."""
     try:
         run = lambda *a: subprocess.run(a, capture_output=True, text=True, timeout=3).stdout.strip()
-        return not run("systemctl", "--user", "list-units", "lineage-build-*", "--no-legend", "--plain")             and bool(run("pgrep", "-f", "repo sync"))
+        return not run("systemctl", "--user", "list-units", "lineage-build-*", "--state=running", "--no-legend", "--plain")             and bool(run("pgrep", "-f", "repo sync"))
     except Exception:
         return False
 
@@ -96,6 +102,7 @@ class State:
         self.soong_hist = []  # build mode: (time, soong_build CPU seconds) samples
         self.soong = None  # build mode: (RAM MB, seconds running, CPU seconds) of soong_build
         self.bar = None  # sync mode: (MB now, MB expected, eta text) drives the bar
+        self.end = None  # (kind, text) of how the last build ended; None while one is running
 
     def reset_average(self):
         self.t0 = self.s0 = None
@@ -121,6 +128,10 @@ class State:
             ("| ", DIM_TEXT),
             (self.task, TEXT),
         ])
+
+    def set_end(self, kind, text):
+        """A build ended: remember how (shown as a box and in the header)."""
+        self.end = (kind, text)
 
     def feed(self, line, now):
         m = PROGRESS.match(line)
@@ -174,6 +185,9 @@ class RemoteFeed:
         self.lines = collections.deque()  # log lines waiting to be fed to State
         self.status = None  # (unit, start epoch, now epoch, soong RAM MB, soong secs, soong CPU secs)
         self.connected, self.error = False, ""
+        self.end, self.end_seq = None, 0  # latest "@@END" report (unit, kind, epoch, text) and a counter of them
+        self.lost_at = None  # when the connection dropped (None while connected)
+        self.last_unit = None  # the build unit last seen running, to say what was lost
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
@@ -185,7 +199,7 @@ class RemoteFeed:
                                check=True, capture_output=True, timeout=30)
                 p = subprocess.Popen(["ssh", *opts, REMOTE_HOST, "bash /tmp/build-live-feed.sh"],
                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-                self.connected, self.error, buf = True, "", b""
+                self.connected, self.error, buf, self.lost_at = True, "", b"", None
                 while True:
                     chunk = p.stdout.read1(65536)
                     if not chunk:
@@ -198,10 +212,18 @@ class RemoteFeed:
                         if line.startswith("@@STATUS "):
                             f = line.split()[1:]
                             self.status = (f[0], int(f[1]), int(f[2]), int(f[3]), int(f[4]), int(f[5]))
+                            if f[0] != "-":
+                                self.last_unit = f[0]
+                        elif line.startswith("@@END "):
+                            f = line.split(None, 4)
+                            self.end = (f[1], f[2], int(f[3]), f[4] if len(f) > 4 else "")
+                            self.end_seq += 1
                         elif line:
                             self.lines.append(line)
             except Exception as e:  # ssh or scp failed: say so, then try again
                 self.error = str(e)[:80]
+            if self.lost_at is None:
+                self.lost_at = time.time()
             self.connected, self.status = False, None
             time.sleep(3)
 
@@ -292,7 +314,7 @@ def build_unit():
     """(unit name, start epoch) of the running build, or (None, None)."""
     try:
         out = subprocess.run(
-            ["systemctl", "--user", "list-units", "lineage-build-*", "--no-legend", "--plain"],
+            ["systemctl", "--user", "list-units", "lineage-build-*", "--state=running", "--no-legend", "--plain"],
             capture_output=True, text=True, timeout=3).stdout.split()
     except Exception:
         return None, None
@@ -301,6 +323,49 @@ def build_unit():
     m = UNIT_TIME.search(out[0])
     start = time.mktime(time.strptime(m[1], "%Y%m%d-%H%M%S")) if m else None
     return out[0], start
+
+
+def local_outcome(unit):
+    """How a build ended, asked of build-live-feed.sh on this machine: (kind, text) or None."""
+    try:
+        feed = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build-live-feed.sh")
+        out = subprocess.run(["bash", feed, "outcome", unit or "latest"], capture_output=True, text=True,
+                             timeout=15, env={**os.environ, "LOG": LOG}).stdout
+        for line in out.splitlines():
+            if line.startswith("@@END "):
+                f = line.split(None, 4)
+                return f[2], (f[4] if len(f) > 4 else "")
+    except Exception:
+        pass
+    return None
+
+
+END_LABEL = {  # kind -> (header text, style)
+    "OK": ("✓ build finished", GREEN),
+    "FAILED": ("✗ BUILD FAILED", RED),
+    "OOM": ("✗ BUILD KILLED: OUT OF MEMORY", RED),
+    "REBOOT": ("✗ MACHINE RESTARTED, build lost", RED),
+    "STOPPED": ("✗ BUILD STOPPED", RED),
+}
+
+
+def banner_lines(state, cols):
+    """The end-of-build message wrapped to the screen width, as (text, style) rows, or []."""
+    if not state or not state.end:
+        return []
+    kind, text = state.end
+    style = GREEN if kind == "OK" else RED
+    width = max(20, cols - 4)
+    rows, cur = [], ""
+    for w in text.split():
+        if cur and len(cur) + 1 + len(w) > width:
+            rows.append(cur)
+            cur = w
+        else:
+            cur = (cur + " " + w).strip()
+    if cur:
+        rows.append(cur)
+    return [(" " + r, style) for r in rows[:4]]
 
 
 SYMBOLS = "!#$%&*+-/:;<=>?@[]^~|\\{}()"
@@ -418,9 +483,10 @@ def bars_of(state):
     return bars
 
 
-def chrome_rows():
-    """Rows that are not the scrolling body: header, the bars (two rows each), footer."""
-    return 2 + 2 * (2 if SYNC else 1)
+def chrome_rows(state=None, cols=100):
+    """Rows that are not the scrolling body: header, the bars (two rows each), the end-of-build
+    box when a build has ended, footer."""
+    return 2 + 2 * (2 if SYNC else 1) + (len(banner_lines(state, cols)) + 1 if state and state.end else 0)
 
 
 def frame(state, streaks, cols, rows, status, elapsed):
@@ -459,8 +525,17 @@ def frame(state, streaks, cols, rows, status, elapsed):
         put(row, 0, [(suffix, BOLD)], cols)
         lines.append(row)
 
+    # End-of-build box (red, or green for a clean finish), right under the bars
+    box = banner_lines(state, cols)
+    if box:
+        for text, style in box:
+            row = blank()
+            put(row, 0, [(text, style)], cols)
+            lines.append(row)
+        lines.append(blank())
+
     # Body: animation underneath, log lines on top, bottom-aligned
-    body = rows - chrome_rows()
+    body = rows - chrome_rows(state, cols)
     grid = streaks.cells() if (streaks and ANIM) else {}
     shown = list(state.lines)[-body:] if body > 0 else []
     for r in range(body):
@@ -500,6 +575,18 @@ def main():
     follower, state = Follower(LOG), State()
     watcher = SyncWatcher() if SYNC else None
     remote = RemoteFeed() if REMOTE else None
+    track = {"seen": 0, "prev_unit": None, "first": True, "bell": False}  # how builds ended
+    demo = os.environ.get("DEMO_END")  # self-test: show the end-of-build box for a made-up ending
+    if demo:
+        sample = {"OOM": "BUILD KILLED, OUT OF MEMORY: killed by systemd-oomd because of memory pressure (the build was "
+                         "using all its RAM and swap). Consumed 19min 44s CPU time over 5min 55s wall clock time, 26G memory "
+                         "peak, 29.3G memory swap peak.",
+                  "OK": "BUILD FINISHED: build completed successfully (14:49 (mm:ss)) ####",
+                  "FAILED": "BUILD FAILED: failed to build some targets (09:54 (mm:ss)) ####",
+                  "REBOOT": "THE MACHINE RESTARTED at 15:11 (power loss, crash or shutdown) and the build did not finish",
+                  "STOPPED": "BUILD STOPPED without a result: it was killed or stopped by hand (no failure was recorded)"}
+        state.set_end(demo, sample.get(demo, demo))
+        track["first"] = False
     if os.name == "nt":  # Windows console: UTF-8 output and ANSI escapes
         os.system("")
         sys.stdout.reconfigure(encoding="utf-8")
@@ -511,6 +598,11 @@ def main():
             now = time.time()
             while remote.lines:
                 state.feed(remote.lines.popleft(), now)
+            if remote.end_seq != track["seen"]:  # the host reported how a build ended
+                track["seen"] = remote.end_seq
+                state.set_end(remote.end[1], remote.end[3])
+                if remote.end[1] != "OK":
+                    track["bell"] = True
             return
         new, truncated = follower.read()
         if truncated:
@@ -569,12 +661,30 @@ def main():
                     else:
                         state.soong_hist = []
                 last_check = t
+                if unit:
+                    state.end = None
+                    track["prev_unit"], track["first"] = unit, False
+                elif not remote and not SYNC and not test_frames and (track["prev_unit"] or track["first"]):
+                    # a build just ended (or we started with none running): ask how it ended
+                    r = local_outcome(track["prev_unit"])
+                    if r:
+                        state.set_end(*r)
+                        if r[0] != "OK":
+                            track["bell"] = True
+                    track["prev_unit"], track["first"] = None, False
             cols, rows = size_now()
             if (cols, rows) != size:
-                size, streaks = (cols, rows), Streaks(cols, rows - chrome_rows())
+                size, streaks = (cols, rows), Streaks(cols, max(1, rows - chrome_rows(state, cols)))
             streaks.step()
-            if unit:
+            if remote and not remote.connected and remote.lost_at is None:
+                status, elapsed = (f"◌ connecting to {REMOTE_HOST} ...", YELLOW), None
+            elif remote and not remote.connected:
+                since = time.strftime("%H:%M", time.localtime(remote.lost_at))
+                status, elapsed = (f"⚠ NO CONTACT WITH {REMOTE_HOST} since {since}: build state unknown", RED), None
+            elif unit:
                 status, elapsed = ("● running", GREEN), (t - start if start else None)
+            elif state.end and not SYNC:
+                status, elapsed = END_LABEL.get(state.end[0], ("✗ BUILD STOPPED", RED)), None
             elif SYNC and state.exit is not None:
                 ok = state.exit == 0
                 status, elapsed = ((f"✓ sync finished" if ok else f"✗ sync failed (exit {state.exit})"),
@@ -590,6 +700,9 @@ def main():
                     print(text)
                     return
                 continue
+            if track["bell"]:
+                text += ""  # something went wrong: make the terminal beep once
+                track["bell"] = False
             sys.stdout.write(text)
             sys.stdout.flush()
             time.sleep(max(0.0, 1.0 / FPS - (time.time() - t)))

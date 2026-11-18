@@ -12,6 +12,15 @@ KERNEL_PATH := device/motorola/utah-kernel
 
 include device/motorola/nevada/BoardConfig.mk
 
+# STOCK VENDOR (2026-11-18): use Motorola's own vendor partition image as it is, instead of rebuilding
+# it from a blob list plus source-built HALs (which mixed Android 13 stock blobs with Android 16 vendor
+# variants of same-named libraries: composer, thermal, audio, effects... all failed one after another).
+# The image (erofs with its AVB hashtree footer) is staged by scripts/make-utah-vendor.sh from our own
+# firmware and is not stored in git. With this set the build copies it unchanged and vbmeta takes its
+# descriptor from the image. Everything the system needs from the vendor (props, init, HALs, sepolicy,
+# VINTF manifest at level 7) then comes from stock, as on Motorola's own Android 16 build.
+BOARD_PREBUILT_VENDORIMAGE := vendor/motorola/utah/prebuilt/vendor.img
+
 # --- utah safety settings for the first flash (see BUILD_PLAN.md, Phase 4, Step C) ---
 
 # Anti-rollback: stock vbmeta and vbmeta_system are both at rollback index 13

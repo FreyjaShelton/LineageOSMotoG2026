@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # After a fresh `repo sync` (WSL or laptop): re-apply our local changes to the
 # synced tree, in the order BUILD_PLAN.md (Phase 3) says. Safe to re-run.
-#   1. git apply patches 0001-0003 in device/motorola/nevada (skipped if already applied)
+#   1. git apply patches 0001-0004 in device/motorola/nevada (skipped if already applied)
 #   2. apply-nevada-blob-fixups.sh   (patchelf fixes for 5 vendor blobs)
 #   3. install-utah-tree.sh          (device/motorola/utah)
 # NOT done here (needs the unpacked firmware and a built host tree): extract-utah-kernel.sh,

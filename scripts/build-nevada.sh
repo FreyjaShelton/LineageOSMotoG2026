@@ -7,6 +7,10 @@
 # Memory: soong_build alone peaks near 28 GB. The script re-runs itself in its
 # own systemd scope with a memory cap, so an out-of-memory kill takes down only
 # the build, not the terminal or the Claude app that started it.
+# systemd-oomd (Ubuntu) kills a scope that sits at its cap while swapping hard ("memory pressure"
+# over 60% for 20 s); it did so at 15:11 on 2026-11-18, mid Soong analysis, though the same build
+# had run through the same pressure all day. The scope opts out (ManagedOOMPreference=omit): the
+# MemoryMax cap above is already what stops a runaway build.
 #   MEM_MAX=26G SWAP_MAX=40G   change the caps
 #   NO_SCOPE=1                 skip the scope (not recommended)
 #   DEVICE=utah                build the utah product instead of nevada (default nevada)
@@ -18,6 +22,7 @@ if [[ -z "$NO_SCOPE" && -z "$BUILD_NEVADA_IN_SCOPE" ]] && command -v systemd-run
   exec systemd-run --user --scope --quiet \
     --unit="lineage-build-$(date +%Y%m%d-%H%M%S)" \
     -p MemoryMax="${MEM_MAX:-26G}" -p MemorySwapMax="${SWAP_MAX:-40G}" \
+    -p ManagedOOMPreference=omit \
     "$(readlink -f "$0")" "$@"
 fi
 
@@ -25,6 +30,10 @@ SRC="${SRC:-$HOME/lineage/android}"
 DEVICE="${DEVICE:-nevada}"
 TARGET="${TARGET:-bacon}"
 LOG="${LOG:-$HOME/lineage/build.log}"
+
+# Clear failed leftovers of earlier builds (a build killed for memory leaves its failed scope behind),
+# so build-live reports THIS build's ending and not an old one.
+systemctl --user reset-failed 'lineage-build-*' 2>/dev/null || true
 
 cd "$SRC" || exit 1
 

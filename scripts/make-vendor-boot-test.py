@@ -50,7 +50,7 @@ out += entry.ljust(up(len(entry)), b"\0")
 total = 64 * 1024 * 1024
 assert len(out) < total
 out = out.ljust(total, b"\0")
-p = r"D:\LineageOS\release\test\vendor_boot_stocklayout.img"
+p = os.environ.get("VB_OUT", r"D:\LineageOS\release\test\vendor_boot_stocklayout.img")   # env VB_OUT: output path
 open(p, "wb").write(out)
 print("wrote", p)
 

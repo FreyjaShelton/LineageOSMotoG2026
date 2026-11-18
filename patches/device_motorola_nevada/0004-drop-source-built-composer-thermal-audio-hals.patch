@@ -1,0 +1,34 @@
+diff --git a/device.mk b/device.mk
+index 7b46303..8b74c8e 100644
+--- a/device.mk
++++ b/device.mk
+@@ -54,7 +54,6 @@ $(call soong_config_set,android_hardware_audio,run_64bit,true)
+ PRODUCT_PACKAGES += \
+     android.hardware.audio@7.0-impl \
+     android.hardware.audio.effect@7.0-impl \
+-    android.hardware.audio.service \
+     android.hardware.soundtrigger@2.3-impl
+ 
+ PRODUCT_PACKAGES +=\
+@@ -124,7 +123,6 @@ PRODUCT_COPY_FILES += \
+ 
+ # Display
+ PRODUCT_PACKAGES += \
+-    android.hardware.graphics.composer@2.3-service \
+     android.hardware.memtrack-service.mediatek-mali
+ 
+ PRODUCT_COPY_FILES += \
+@@ -336,12 +334,7 @@ PRODUCT_SOONG_NAMESPACES += \
+     hardware/google/pixel \
+     hardware/google/interfaces
+ 
+-# Thermal
+-PRODUCT_PACKAGES += \
+-    android.hardware.thermal-service.mediatek
+-
+-PRODUCT_COPY_FILES += \
+-    $(LOCAL_PATH)/configs/thermal_info_config.json:$(TARGET_COPY_OUT_VENDOR)/etc/thermal_info_config.json
++# Thermal: utah uses stock's HIDL thermal@2.0-service.mtk (vendor/motorola/utah, scripts/make-utah-vendor.sh)
+ 
+ # Touch
+ PRODUCT_PACKAGES += \

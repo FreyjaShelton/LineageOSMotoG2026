@@ -5,12 +5,17 @@
 set -euo pipefail
 OUT="$HOME/lineage/android/out/target/product/utah"
 REL="$HOME/lineage/release/${1:-utah-$(date +%Y%m%d)-debug}"
-RC="$OUT/vendor/etc/init/zz-debug-panic.rc"
+RC="$OUT/system/etc/init/zz-debug-log.rc"
+SH="$OUT/system/bin/zz-debug-log.sh"
 
-echo "== debug rc in the built vendor image tree"
+echo "== debug logger in the built system image tree"
 test -f "$RC" && echo "present: $RC" || { echo "MISSING $RC"; exit 1; }
-grep -q 'grep -q 1' "$RC" && echo "contains 'grep -q 1': yes" || echo "contains 'grep -q 1': NO"
-if grep -q '\$' "$RC"; then echo "contains a dollar sign: YES (bad)"; else echo "contains a dollar sign: no"; fi
+test -f "$SH" && echo "present: $SH" || { echo "MISSING $SH"; exit 1; }
+# the rc must not contain a "$" (init expands those; the script may)
+if grep -v '^[[:space:]]*#' "$RC" | grep -q '[$]'; then echo "rc contains a dollar sign in a command: YES (bad)"; else echo "rc has no dollar signs in commands: ok"; fi
+sh -n "$SH" && echo "script syntax: ok"
+STOCK_VENDOR="${STOCK_VENDOR:-$HOME/lineage/work/parts/vendor_a.img}"
+if cmp -s "$OUT/vendor.img" "$STOCK_VENDOR"; then echo "ok   vendor.img is stock's vendor image, byte for byte"; else echo "WRONG vendor.img is NOT stock's ($STOCK_VENDOR): do not flash"; fi
 for f in system_ext/bin/hwservicemanager system_ext/etc/init/hwservicemanager.rc system_ext/bin/hw/android.hidl.allocator@1.0-service; do
   [ -e "$OUT/$f" ] && echo "ok   $f" || echo "MISSING $f"
 done

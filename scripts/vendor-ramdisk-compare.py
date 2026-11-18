@@ -1,7 +1,7 @@
 import struct, os, sys, collections, hashlib
 
 S = r"D:\LineageOS\firmware\NEVADA_G_SYS_W1WNS36.18_114_3_2_1_1_1_subsidy_DEFAULT_regulatory_DEFAULT_cid50_CFC.xml\vendor_boot.img"
-O = r"D:\LineageOS\release\utah-20261117-r2\vendor_boot.img"
+O = os.environ.get("VB_OURS", r"D:\LineageOS\release\utah-20261117-r2\vendor_boot.img")   # env VB_OURS: the build's vendor_boot.img
 
 def lz4_block(src, max_out):
     out = bytearray(); i = 0; n = len(src)
