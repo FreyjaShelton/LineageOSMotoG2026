@@ -33,6 +33,7 @@ $bad = 0
 foreach ($line in Get-Content $sums) {
     if ($line -notmatch '^([0-9a-f]{64})\s+\*?(.+)$') { continue }
     $want, $file = $Matches[1], $Matches[2]
+    if ($file -eq "SHA256SUMS") { continue }
     $path = Join-Path $target $file
     if (-not (Test-Path $path)) { Write-Host "MISSING  $file"; $bad++; continue }
     $got = (Get-FileHash $path -Algorithm SHA256).Hash.ToLower()
