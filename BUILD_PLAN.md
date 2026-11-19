@@ -2,7 +2,13 @@
 
 How we get from "locked phone and no tree" to a LineageOS build for the Moto g 2026 (`utah`, XT2613-1). Status of each phase is tracked here. See [README.md](README.md) for the device facts.
 
-## Where we left off (end of 2026-11-18, evening): START HERE
+## PHONE STATE CHANGED, 2026-11-19: stock firmware, bootloader LOCKED (read before anything below)
+
+The user needs the Dasher delivery app on this phone. Dasher was hidden in the Play Store ("not compatible with your device") because the phone showed **Play Protect certification: "Device is not certified"** with the bootloader unlocked (`verifiedbootstate=orange`, stock firmware otherwise). On 2026-11-19 we ran `scripts/restore-stock.ps1` (all writes OKAY, MD5s checked first), booted stock once to the setup screen, then `fastboot flashing lock` from the bootloader (no confirmation prompt on the phone; it answered "Phone is locked"). The first boot after the lock landed on stock recovery's "Can't load Android system"; **Try again failed, Factory data reset fixed it**. After setup the Play Store certified the phone and Dasher installed.
+
+**Consequences for the LineageOS work:** the phone cannot be flashed until it is unlocked again. The earlier unlock code is used up; a new request to Motorola's unlock portal is needed, and it is NOT verified that the portal will give one again. Unlocking wipes the phone and will make Play report "not certified" again, so **Dasher stops working while a custom build is on it**. A custom ROM and an unlocked bootloader fail Play Integrity at the device level. Do not unlock or flash this phone without the user's explicit go, and tell them Dasher will stop working. Anything below that says "the bootloader stays unlocked" is history.
+
+## Where we left off (end of 2026-11-18, evening): START HERE (history for the build work; the phone-state note above is newer)
 
 **One line:** after a day of flashing debug builds, our LineageOS 23 for the Moto g 2026 (`utah`) **boots to the boot animation with Android's framework alive** (USB MTP appears, `zygote`, `surfaceflinger`, `system_server` run) **but the whole phone reboots about every 6 to 7 minutes and never finishes booting**. The cause is not in Lineage: the nevada tree **rebuilds the vendor partition** from a blob list plus HALs compiled from source, which mixes Android 13 stock blobs with Android 16 builds of same-named libraries, and every layer broke that way (composer, thermal, audio HAL, its libraries, its effects). **Decision (user, 2026-11-18): use Motorola's own `vendor.img` as it is** (`BOARD_PREBUILT_VENDORIMAGE`). It is wired in, **built and checked on the laptop (release `utah-20261118-debug8`, see "RESULT OF THAT BUILD" below), but NOT yet flashed or booted.**
 

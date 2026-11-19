@@ -47,6 +47,12 @@ Use the logger that runs on the phone and writes into `/metadata/dbg` every 20 s
 
 **Why:** it was the first method that gave real evidence (the composer crash loop, the 32-bit zygote kill loop, the audio effects crash), after many rounds of blind tests.
 
+## The phone is the user's Dasher phone: ask before unlocking or flashing
+
+The user relies on the Dasher (DoorDash driver) app on this phone. An unlocked bootloader made Play report the device "not certified", which hid Dasher; custom ROMs fail Play Integrity too. As of 2026-11-19 the phone is stock with a LOCKED bootloader and Dasher works. Before any unlock, flash or custom build, say plainly that Dasher will stop working, and get an explicit go. Do not download or sideload APKs from third-party sites; the user must do that part (LineageOS has no Play Store unless GApps are flashed).
+
+**Why:** the user did not know the unlock would block Dasher until 2026-11-19 and had to wipe and relock the phone to get it back.
+
 ## Check a build on the build machine before it goes on the phone
 
 After every build, before flashing: run `scripts/make-release.sh <name>` (logger present, boot image headers, and that `vendor.img` is stock's byte for byte), and fetch it with `scripts/fetch-release.ps1`. If the vendor is ever built again from blobs, also run `scripts/check-vendor-libs.sh` and `python3 -I scripts/check-vendor-symbols.py`. A check that is too lenient is worse than none: the first library check passed two bad builds because it counted `/system/lib64` as visible to vendor code, and an early version of a check reported "0 problems" because it had checked 0 files. Make a checker fail when it verified nothing.
